@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Define character encoding for the document -->
+    <meta charset="UTF-8">
+    <!-- Configure the viewport for responsive design -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Set the page title that appears in browser tabs -->
+    <title>Solitaire game</title>
+</head>
+<body>
+    <!-- Start screen container with center alignment and top margin -->
+    <div id="start-screen" style="text-align: center; margin-top: 80px;">
+        <!-- Main game title -->
+        <h1>Classic Solitaire</h1>
+        
+        <!-- SVG graphic containing card illustrations for the start screen -->
+        <svg viewBox="0 0 400 220"  style="max-width: 400px;">
+            <!-- Green card table background for the illustration -->
+            <rect width="400" height="220" fill="#076324" />
+            
+            <!-- Card designs for visual appeal -->
+            <!-- Ace of Hearts card illustration -->
+            <rect x="120" y="60" width="70" height="100" rx="5" fill="white" stroke="black" />
+            <text x="125" y="80" font-family="sans-serif" font-size="18" fill="red">A</text>
+            <!-- Heart symbol using SVG path -->
+            <path d="M155,110 C155,100 145,90 135,100 C125,110 135,125 155,115 C175,125 185,110 175,100 C165,90 155,100 155,110" fill="red" />
+            
+            <!-- King of Spades card illustration, slightly offset -->
+            <rect x="140" y="70" width="70" height="100" rx="5" fill="white" stroke="black" />
+            <text x="145" y="90" font-family="sans-serif" font-size="18">K</text>
+            <!-- Spade symbol using SVG path -->
+            <path d="M175,140 C175,130 165,120 160,125 C155,130 170,145 175,120 C180,145 195,130 190,125 C185,120 175,130 175,140" fill="black" />
+            
+            <!-- Queen of Diamonds card illustration, slightly offset -->
+            <rect x="160" y="80" width="70" height="100" rx="5" fill="white" stroke="black" />
+            <text x="165" y="100" font-family="sans-serif" font-size="18" fill="red">Q</text>
+            <!-- Diamond symbol using a simple path -->
+            <path d="M195,130 L205,140 L195,150 L185,140 Z" fill="red" />
+            
+            <!-- Jack of Clubs card illustration, slightly offset -->
+            <rect x="180" y="90" width="70" height="100" rx="5" fill="white" stroke="black" />
+            <text x="185" y="110" font-family="sans-serif" font-size="18">J</text>
+            <!-- Club symbol using SVG path -->
+            <path d="M215,150 C215,145 212,140 208,140 C204,140 201,145 201,150 C201,154 205,155 205,160 L215,160 C215,155 219,154 219,150 C219,145 216,140 212,140 C208,140 205,145 205,150" fill="black" />
+        </svg>
+        
+        <!-- Play button container with vertical margin -->
+        <div style="margin: 40px 0;">
+            <!-- Start game button with styling -->
+            <button id="start-button" style="font-size: 24px; padding: 15px 40px; cursor: pointer; background-color: #076324; color: white; border: none; border-radius: 10px; font-weight: bold;">
+                PLAY SOLITAIRE
+            </button>
+        </div>
+        
+        <!-- Brief game instructions -->
+        <div>
+            <p>Stack cards in descending order and alternate colors. Build up foundation piles by suit.</p>
+        </div>
+    </div>
+
+    <!-- Game container, initially hidden until start button is clicked -->
+    <div id="game-container" style="display: none;">
+        <!-- SVG element where the game will be rendered -->
+        <svg id="game-svg" width="100%" height="600"></svg>
+        <!-- Game control buttons -->
+        <div id="controls">
+            <button id="new-game-btn">New Game</button>
+            <button id="auto-complete-btn">Auto Complete</button>
+        </div>
+        <!-- Message display area for game notifications -->
+        <div id="message"></div>
+    </div>
+
+    <script>
+        // Game constants for card dimensions and spacing
+        const CARD_WIDTH = 80;
+        const CARD_HEIGHT = 120;
+        const CARD_RADIUS = 5;
+        const TABLEAU_SPACING = 12;  // Vertical spacing between cards in tableau piles
+        
+        // Card definitions for the deck
+        const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
+        const suitSymbols = {'hearts': '♥', 'diamonds': '♦', 'clubs': '♣', 'spades': '♠'};
+        const suitColors = {'hearts': 'red', 'diamonds': 'red', 'clubs': 'black', 'spades': 'black'};
+        const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        
+        // Game state variables
+        let deck = [];             // Cards in the stock pile
+        let waste = [];            // Cards in the waste pile (cards drawn from stock)
+        let foundations = [[], [], [], []];  // Foundation piles (one for each suit)
+        let tableaus = [[], [], [], [], [], [], []];  // Seven tableau piles for gameplay
+        let draggedCards = [];     // Cards currently being dragged
+        let dragSource = null;     // Source pile of the currently dragged cards
+        let isDragging = false;    // Flag to track if a drag operation is in progress
+        let gameWon = false;       // Flag to track if the game has been won
+        let dragOffsetX = 0;       // X offset for dragging (relative to card position)
+        let dragOffsetY = 0;       // Y offset for dragging (relative to card position)
+        
+        // SVG element reference and namespace
+        const svg = document.getElementById('game-svg');
+        const svgNS = "http://www.w3.org/2000/svg";  // Required namespace for creating SVG elements
+        
+        // Define positions and dimensions for all game areas
+        const areas = {
+            stock: { x: 30, y: 30, width: CARD_WIDTH, height: CARD_HEIGHT },  // Stock pile (face down cards)
+            waste: { x: 30 + CARD_WIDTH + 20, y: 30, width: CARD_WIDTH, height: CARD_HEIGHT },  // Waste pile (face up cards from stock)
+            foundations: Array(4).fill().map((_, i) => ({  // Four foundation piles (where suits are built up)
+                x: 30 + (CARD_WIDTH + 20) * (3 + i),
+                y: 30,
+                width: CARD_WIDTH,
+                height: CARD_HEIGHT
+            })),
+            tableaus: Array(7).fill().map((_, i) => ({  // Seven tableau piles (main play area)
+                x: 30 + (CARD_WIDTH + 20) * i,
+                y: 30 + CARD_HEIGHT + 30,
+                width: CARD_WIDTH,
+                height: CARD_HEIGHT + 300  // Extra height for card stacking
+            }))
+        };
+
+        // Initialize the game setup
+        function initGame() {
+            // Set SVG size explicitly
+            svg.setAttribute("width", "800");
+            svg.setAttribute("height", "600");
+            
+            // Create and add SVG background (green table)
+            const bgRect = document.createElementNS(svgNS, "rect");
+            bgRect.setAttribute("width", "100%");
+            bgRect.setAttribute("height", "100%");
+            bgRect.setAttribute("fill", "#277234");  // Green felt color
+            svg.appendChild(bgRect);
+
+            // Style the message element for notifications
+            const message = document.getElementById('message');
+            message.style.position = "absolute";
+            message.style.top = "50%";
+            message.style.left = "50%";
+            message.style.transform = "translate(-50%, -50%)";  // Center the message
+            message.style.padding = "20px";
+            message.style.backgroundColor = "rgba(255, 255, 255, 0.9)";  // Semi-transparent white
+            message.style.borderRadius = "10px";
+            message.style.fontSize = "24px";
+            message.style.fontWeight = "bold";
+            message.style.display = "none";  // Initially hidden
+            message.style.zIndex = "100";  // Ensure it appears above game elements
+            
+            // Set up mouse event listeners for game interaction
+            svg.addEventListener('mousedown', handleMouseDown);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            
+            // Add event listeners to control buttons
+            document.getElementById('new-game-btn').addEventListener('click', newGame);
+            document.getElementById('auto-complete-btn').addEventListener('click', autoComplete);
+            
+            // Start a new game
+            newGame();
+            // Start the game rendering loop
+            requestAnimationFrame(gameLoop);
+
+            setupTouchEvents();
+        }
+        
+        // Create a new game with shuffled cards
+        function newGame() {
+            // Clear SVG of all elements except background
+            while (svg.childNodes.length > 1) {
+                svg.removeChild(svg.lastChild);
+            }
+            
+            // Create a full deck of 52 cards
+            deck = [];
+            for (const suit of suits) {
+                for (let i = 0; i < values.length; i++) {
+                    deck.push({
+                        suit,
+                        value: values[i],
+                        rank: i + 1,  // Numerical rank (A=1, K=13)
+                        faceUp: false,  // Initially face down
+                        x: 0,
+                        y: 0          // Position coordinates (updated during drawing)
+                    });
+                }
+            }
+            
+            // Shuffle the deck using Fisher-Yates algorithm
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];  // Swap elements
+            }
+            
+            // Reset all card piles
+            waste = [];
+            foundations = [[], [], [], []];
+            tableaus = [[], [], [], [], [], [], []];
+            
+            // Deal cards to the tableau piles
+            for (let i = 0; i < 7; i++) {
+                for (let j = i; j < 7; j++) {
+                    const card = deck.pop();
+                    if (i === j) card.faceUp = true;  // Top card is face up
+                    tableaus[j].push(card);
+                }
+            }
+            
+            // Reset game state variables
+            draggedCards = [];
+            dragSource = null;
+            isDragging = false;
+            gameWon = false;
+            hideMessage();  // Hide any existing messages
+        }
+        
+        // Main game rendering loop
+        function gameLoop() {
+            // Clear existing card elements (except background)
+            while (svg.childNodes.length > 1) {
+                svg.removeChild(svg.lastChild);
+            }
+            
+            // Draw all game elements
+            drawStock();        // Draw the stock pile
+            drawWaste();        // Draw the waste pile
+            drawFoundations();  // Draw the foundation piles
+            drawTableaus();     // Draw the tableau piles
+            drawDraggedCards(); // Draw any cards being dragged
+            
+            // Check if the game has been won
+            checkWin();
+            
+            // Continue the game loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Draw the stock pile (face down cards)
+        function drawStock() {
+            if (deck.length > 0) {
+                // Draw card back if there are cards in the deck
+                drawCardBack(areas.stock.x, areas.stock.y);
+                
+                // Draw card count on top of stock pile
+                const text = document.createElementNS(svgNS, "text");
+                text.setAttribute("x", areas.stock.x + CARD_WIDTH / 2);
+                text.setAttribute("y", areas.stock.y + CARD_HEIGHT / 2 + 6);
+                text.setAttribute("text-anchor", "middle");  // Center text horizontally
+                text.setAttribute("fill", "white");
+                text.setAttribute("font-size", "16");
+                text.textContent = deck.length;  // Show number of cards remaining
+                svg.appendChild(text);
+            } else {
+                // Draw empty space if stock is empty
+                drawEmptyPile(areas.stock.x, areas.stock.y);
+                
+                // Draw recycle symbol if waste has cards (to indicate reset option)
+                if (waste.length > 0) {
+                    const text = document.createElementNS(svgNS, "text");
+                    text.setAttribute("x", areas.stock.x + CARD_WIDTH / 2);
+                    text.setAttribute("y", areas.stock.y + CARD_HEIGHT / 2 + 6);
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("fill", "white");
+                    text.setAttribute("font-size", "20");
+                    text.textContent = "↻";  // Recycle symbol
+                    svg.appendChild(text);
+                }
+            }
+        }
+        
+        // Draw the waste pile (cards drawn from stock)
+        function drawWaste() {
+            if (waste.length > 0) {
+                // Draw top card of waste pile face up
+                const card = waste[waste.length - 1];
+                drawCard(card, areas.waste.x, areas.waste.y);
+            } else {
+                // Draw empty space if waste is empty
+                drawEmptyPile(areas.waste.x, areas.waste.y);
+            }
+        }
+        
+        // Draw the foundation piles (where suits are built up)
+        function drawFoundations() {
+            foundations.forEach((pile, i) => {
+                const area = areas.foundations[i];
+                if (pile.length > 0) {
+                    // Draw top card if pile has cards
+                    drawCard(pile[pile.length - 1], area.x, area.y);
+                } else {
+                    // Draw empty space with suit indicator
+                    drawEmptyPile(area.x, area.y);
+                    
+                    // Add suit symbol to empty foundation
+                    const text = document.createElementNS(svgNS, "text");
+                    text.setAttribute("x", area.x + CARD_WIDTH / 2);
+                    text.setAttribute("y", area.y + CARD_HEIGHT / 2 + 8);
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("fill", suitColors[suits[i]]);  // Color based on suit
+                    text.setAttribute("font-size", "24");
+                    text.textContent = suitSymbols[suits[i]];  // Suit symbol (♥, ♦, ♣, ♠)
+                    svg.appendChild(text);
+                }
+            });
+        }
+        
+        // Draw the tableau piles (main play area)
+        function drawTableaus() {
+            tableaus.forEach((pile, i) => {
+                const area = areas.tableaus[i];
+                if (pile.length === 0) {
+                    // Draw empty space if pile is empty
+                    drawEmptyPile(area.x, area.y);
+                } else {
+                    // Draw each card in the pile with spacing
+                    pile.forEach((card, j) => {
+                        const y = area.y + j * TABLEAU_SPACING;  // Space cards vertically
+                        if (card.faceUp) {
+                            drawCard(card, area.x, y);  // Draw face up card
+                        } else {
+                            drawCardBack(area.x, y);    // Draw card back
+                        }
+                    });
+                }
+            });
+        }
+        
+        // Draw cards that are currently being dragged
+        function drawDraggedCards() {
+            if (isDragging && draggedCards.length > 0) {
+                // Draw each dragged card at its current position
+                draggedCards.forEach((card, i) => {
+                    drawCard(card, card.x, card.y + i * TABLEAU_SPACING);  // Stack cards with spacing
+                });
+            }
+        }
+        
+        // Draw the back of a card (face down)
+        function drawCardBack(x, y) {
+            // Create card base rectangle
+            const rect = document.createElementNS(svgNS, "rect");
+            rect.setAttribute("x", x);
+            rect.setAttribute("y", y);
+            rect.setAttribute("width", CARD_WIDTH);
+            rect.setAttribute("height", CARD_HEIGHT);
+            rect.setAttribute("rx", CARD_RADIUS);  // Rounded corners
+            rect.setAttribute("ry", CARD_RADIUS);
+            rect.setAttribute("fill", "#1c3c8d");  // Blue card back
+            rect.setAttribute("stroke", "#000");
+            rect.setAttribute("stroke-width", "1");
+            svg.appendChild(rect);
+            
+            // Add pattern of dots to card back
+            for (let py = 10; py < CARD_HEIGHT; py += 10) {
+                for (let px = 10; px < CARD_WIDTH; px += 10) {
+                    // Create a small circle at each grid position
+                    const circle = document.createElementNS(svgNS, "circle");
+                    circle.setAttribute("cx", x + px);
+                    circle.setAttribute("cy", y + py);
+                    circle.setAttribute("r", "2");
+                    circle.setAttribute("fill", "#0c2c7d");  // Dark blue dot
+                    circle.setAttribute("stroke", "#2c4c9d");  // Light blue border
+                    circle.setAttribute("stroke-width", "1");
+                    svg.appendChild(circle);
+                }
+            }
+        }
+        
+        // Draw the face of a card
+        function drawCard(card, x, y) {
+            // Store position for dragging reference
+            card.x = x;
+            card.y = y;
+            
+            // Create card base rectangle
+            const rect = document.createElementNS(svgNS, "rect");
+            rect.setAttribute("x", x);
+            rect.setAttribute("y", y);
+            rect.setAttribute("width", CARD_WIDTH);
+            rect.setAttribute("height", CARD_HEIGHT);
+            rect.setAttribute("rx", CARD_RADIUS);  // Rounded corners
+            rect.setAttribute("ry", CARD_RADIUS);
+            rect.setAttribute("fill", "white");
+            rect.setAttribute("stroke", "#000");
+            rect.setAttribute("stroke-width", "1");
+            svg.appendChild(rect);
+            
+            const color = suitColors[card.suit];  // Get color based on suit (red or black)
+            
+            // Top-left value - Renders the card's value in the top-left corner
+const topValue = document.createElementNS(svgNS, "text");
+topValue.setAttribute("x", x + 5);  // Position 5px from left edge of card
+topValue.setAttribute("y", y + 18); // Position 18px from top edge of card
+topValue.setAttribute("fill", color); // Set text color (red or black based on suit)
+topValue.setAttribute("font-size", "16"); // Set font size to 16px
+topValue.textContent = card.value; // Set text content to card value (A, 2, 3, etc.)
+svg.appendChild(topValue); // Add text element to SVG
+
+// Top-left suit - Renders the suit symbol in the top-left corner
+const topSuit = document.createElementNS(svgNS, "text");
+topSuit.setAttribute("x", x + 5); // Position 5px from left edge of card
+topSuit.setAttribute("y", y + 35); // Position 35px from top edge (below the value)
+topSuit.setAttribute("fill", color); // Set text color (red or black based on suit)
+topSuit.setAttribute("font-size", "16"); // Set font size to 16px
+topSuit.textContent = suitSymbols[card.suit]; // Display the suit symbol (♠, ♥, ♦, ♣)
+svg.appendChild(topSuit); // Add text element to SVG
+
+// Bottom-right value - Renders the card's value in the bottom-right corner (upside down)  
+const bottomValue = document.createElementNS(svgNS, "text");
+bottomValue.setAttribute("x", x + CARD_WIDTH - 5); // Position 5px from right edge
+bottomValue.setAttribute("y", y + CARD_HEIGHT - 8); // Position 8px from bottom edge
+bottomValue.setAttribute("text-anchor", "end"); // Right-align text
+bottomValue.setAttribute("fill", color); // Set text color (red or black)
+bottomValue.setAttribute("font-size", "16"); // Set font size to 16px
+bottomValue.textContent = card.value; // Set text content to card value
+svg.appendChild(bottomValue); // Add text element to SVG
+
+// Bottom-right suit - Renders the suit symbol in the bottom-right corner
+const bottomSuit = document.createElementNS(svgNS, "text");
+bottomSuit.setAttribute("x", x + CARD_WIDTH - 5); // Position 5px from right edge
+bottomSuit.setAttribute("y", y + CARD_HEIGHT - 25); // Position 25px from bottom edge (above value)
+bottomSuit.setAttribute("text-anchor", "end"); // Right-align text
+bottomSuit.setAttribute("fill", color); // Set text color (red or black)
+bottomSuit.setAttribute("font-size", "16"); // Set font size to 16px
+bottomSuit.textContent = suitSymbols[card.suit]; // Display the suit symbol
+svg.appendChild(bottomSuit); // Add text element to SVG
+
+// Center symbol - Renders a larger suit symbol in the center of the card
+const centerSymbol = document.createElementNS(svgNS, "text");
+centerSymbol.setAttribute("x", x + CARD_WIDTH / 2); // Center horizontally
+centerSymbol.setAttribute("y", y + CARD_HEIGHT / 2 + 10); // Center vertically with slight adjustment
+centerSymbol.setAttribute("text-anchor", "middle"); // Center-align text
+centerSymbol.setAttribute("fill", color); // Set text color (red or black)
+centerSymbol.setAttribute("font-size", "32"); // Set font size to 32px (larger than corner symbols)
+centerSymbol.textContent = suitSymbols[card.suit]; // Display the suit symbol
+svg.appendChild(centerSymbol); // Add text element to SVG
+}
+
+// drawEmptyPile - Creates a visual placeholder for empty card piles (foundations or tableaus)
+function drawEmptyPile(x, y) {
+    const rect = document.createElementNS(svgNS, "rect"); // Create rectangle element
+    rect.setAttribute("x", x); // Set x position
+    rect.setAttribute("y", y); // Set y position
+    rect.setAttribute("width", CARD_WIDTH); // Set width to card width
+    rect.setAttribute("height", CARD_HEIGHT); // Set height to card height
+    rect.setAttribute("rx", CARD_RADIUS); // Set corner radius for x
+    rect.setAttribute("ry", CARD_RADIUS); // Set corner radius for y
+    rect.setAttribute("stroke", "rgba(255,255,255,0.5)"); // Set border color to semi-transparent white
+    rect.setAttribute("stroke-width", "2"); // Set border width to 2px
+    rect.setAttribute("fill", "none"); // Make rectangle transparent (only show outline)
+    svg.appendChild(rect); // Add rectangle to SVG
+}
+
+// handleMouseDown - Processes clicks on the game board to start card movements
+function handleMouseDown(e) {
+    if (gameWon) return; // Do nothing if game is already won
+    
+    // Calculate mouse position relative to SVG element
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // Check if user clicked on the stock pile
+    if (pointInRect(mouseX, mouseY, areas.stock)) {
+        if (deck.length > 0) {
+            // If deck has cards, move top card to waste pile
+            const card = deck.pop();
+            card.faceUp = true; // Flip card face up
+            waste.push(card); // Add to waste pile
+        } else if (waste.length > 0) {
+            // If deck is empty but waste has cards, reset deck from waste
+            deck = waste.map(c => ({ ...c, faceUp: false })).reverse(); // Copy cards, flip face down, and reverse order
+            waste = []; // Empty waste pile
+        }
+        return;
+    }
+    
+    // Check if user clicked on the waste pile
+    if (waste.length > 0 && pointInRect(mouseX, mouseY, areas.waste)) {
+        const card = waste[waste.length - 1]; // Get top card from waste
+        startDrag([card], mouseX, mouseY, { type: 'waste' }); // Start dragging the card
+        return;
+    }
+    
+    // Check if user clicked on one of the foundation piles
+    for (let i = 0; i < 4; i++) {
+        if (foundations[i].length > 0 && pointInRect(mouseX, mouseY, areas.foundations[i])) {
+            const card = foundations[i][foundations[i].length - 1]; // Get top card from foundation
+            startDrag([card], mouseX, mouseY, { type: 'foundation', index: i }); // Start dragging
+            return;
+        }
+    }
+    
+    // Check if user clicked on one of the tableau piles
+    for (let i = 0; i < 7; i++) {
+        const pile = tableaus[i];
+        if (pile.length === 0) continue; // Skip empty piles
+        
+        // Check each card in the tableau from bottom to top
+        for (let j = pile.length - 1; j >= 0; j--) {
+            const card = pile[j];
+            if (!card.faceUp) continue; // Skip face-down cards
+            
+            // Calculate card position (cards are staggered in tableaus)
+            const cardY = areas.tableaus[i].y + j * TABLEAU_SPACING;
+            const cardArea = {
+                x: areas.tableaus[i].x,
+                y: cardY,
+                width: CARD_WIDTH,
+                // If it's the bottom card, use full height, otherwise just the visible part
+                height: j === pile.length - 1 ? CARD_HEIGHT : TABLEAU_SPACING
+            };
+            
+            if (pointInRect(mouseX, mouseY, cardArea)) {
+                // Get all cards from this one to the bottom of pile
+                const cardsToDrag = pile.slice(j);
+                startDrag(cardsToDrag, mouseX, mouseY, { 
+                    type: 'tableau', 
+                    index: i, 
+                    cardIndex: j 
+                });
+                return;
+            }
+        }
+    }
+}
+
+// startDrag - Sets up the dragging operation for selected card(s)
+function startDrag(cards, mouseX, mouseY, source) {
+    // Make sure all cards are face up
+    const faceUpCards = cards.map(card => ({ ...card, faceUp: true }));
+    
+    // Store dragged cards and source information
+    draggedCards = faceUpCards;
+    dragSource = source;
+    isDragging = true;
+    
+    // Calculate offsets to maintain mouse position relative to card
+    dragOffsetX = mouseX - cards[0].x;
+    dragOffsetY = mouseY - cards[0].y;
+    
+    // Update position immediately to prevent visual jumping
+    draggedCards[0].x = mouseX - dragOffsetX;
+    draggedCards[0].y = mouseY - dragOffsetY;
+}
+
+// handleMouseMove - Updates position of dragged cards during movement
+function handleMouseMove(e) {
+    if (!isDragging || draggedCards.length === 0) return; // Do nothing if not dragging
+    
+    // Calculate mouse position relative to SVG
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // Update dragged cards position (only need to update first card, others follow)
+    draggedCards[0].x = mouseX - dragOffsetX;
+    draggedCards[0].y = mouseY - dragOffsetY;
+}
+
+// handleMouseUp - Processes the end of a drag operation
+function handleMouseUp(e) {
+    if (!isDragging || draggedCards.length === 0) return; // Do nothing if not dragging
+    
+    // Calculate mouse position relative to SVG
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    let dropSuccess = false;
+    
+    // Try to drop on foundations first (higher priority)
+    for (let i = 0; i < 4; i++) {
+        if (pointInRect(mouseX, mouseY, areas.foundations[i])) {
+            dropSuccess = tryDropOnFoundation(i);
+            break;
+        }
+    }
+    
+    // If not dropped on foundation, try tableaus
+    if (!dropSuccess) {
+        for (let i = 0; i < 7; i++) {
+            if (pointInRect(mouseX, mouseY, areas.tableaus[i])) {
+                dropSuccess = tryDropOnTableau(i);
+                break;
+            }
+        }
+    }
+    
+    // If cards were successfully moved and came from a tableau,
+    // flip the new top card if needed
+    if (dropSuccess && dragSource && dragSource.type === 'tableau') {
+        const sourcePile = tableaus[dragSource.index];
+        if (sourcePile.length > 0 && !sourcePile[sourcePile.length - 1].faceUp) {
+            sourcePile[sourcePile.length - 1].faceUp = true;
+        }
+    }
+    
+    // Clean up drag state
+    draggedCards = [];
+    isDragging = false;
+} 
+// Add this function to your code
+function setupTouchEvents() {
+    // Add touch event listeners for mobile devices
+    svg.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+    document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+    
+    console.log("Touch events set up");
+}
+
+// Touch event handlers
+function handleTouchStart(e) {
+    e.preventDefault(); // Prevent default touch behaviors
+    
+    if (!e.touches || e.touches.length === 0) return;
+    
+    const touch = e.touches[0];
+    const rect = svg.getBoundingClientRect();
+    const mouseX = touch.clientX - rect.left;
+    const mouseY = touch.clientY - rect.top;
+    
+    console.log("Touch start at:", mouseX, mouseY);
+    
+    // Check if user touched the stock pile
+    if (pointInRect(mouseX, mouseY, areas.stock)) {
+        if (deck.length > 0) {
+            const card = deck.pop();
+            card.faceUp = true;
+            waste.push(card);
+        } else if (waste.length > 0) {
+            deck = waste.map(c => ({ ...c, faceUp: false })).reverse();
+            waste = [];
+        }
+        return;
+    }
+    
+    // Check if user touched the waste pile
+    if (waste.length > 0 && pointInRect(mouseX, mouseY, areas.waste)) {
+        const card = waste[waste.length - 1];
+        startDrag([card], mouseX, mouseY, { type: 'waste' });
+        return;
+    }
+    
+    // Check if user touched one of the foundation piles
+    for (let i = 0; i < 4; i++) {
+        if (foundations[i].length > 0 && pointInRect(mouseX, mouseY, areas.foundations[i])) {
+            const card = foundations[i][foundations[i].length - 1];
+            startDrag([card], mouseX, mouseY, { type: 'foundation', index: i });
+            return;
+        }
+    }
+    
+    // Check if user touched one of the tableau piles
+    for (let i = 0; i < 7; i++) {
+        const pile = tableaus[i];
+        if (pile.length === 0) continue;
+        
+        for (let j = pile.length - 1; j >= 0; j--) {
+            const card = pile[j];
+            if (!card.faceUp) continue;
+            
+            const cardY = areas.tableaus[i].y + j * TABLEAU_SPACING;
+            const cardArea = {
+                x: areas.tableaus[i].x,
+                y: cardY,
+                width: CARD_WIDTH,
+                height: j === pile.length - 1 ? CARD_HEIGHT : TABLEAU_SPACING
+            };
+            
+            if (pointInRect(mouseX, mouseY, cardArea)) {
+                const cardsToDrag = pile.slice(j);
+                startDrag(cardsToDrag, mouseX, mouseY, { 
+                    type: 'tableau', 
+                    index: i, 
+                    cardIndex: j 
+                });
+                return;
+            }
+        }
+    }
+}
+
+function handleTouchMove(e) {
+    if (!isDragging || draggedCards.length === 0) return;
+    
+    e.preventDefault(); // Prevent scrolling
+    
+    if (!e.touches || e.touches.length === 0) return;
+    
+    const touch = e.touches[0];
+    const rect = svg.getBoundingClientRect();
+    const mouseX = touch.clientX - rect.left;
+    const mouseY = touch.clientY - rect.top;
+    
+    // Update dragged cards position
+    draggedCards[0].x = mouseX - dragOffsetX;
+    draggedCards[0].y = mouseY - dragOffsetY;
+}
+
+function handleTouchEnd(e) {
+    if (!isDragging || draggedCards.length === 0) return;
+    
+    // Use the current position of the first dragged card for drop detection
+    const cardX = draggedCards[0].x + CARD_WIDTH / 2;
+    const cardY = draggedCards[0].y + CARD_HEIGHT / 2;
+    
+    console.log("Touch end - dropping card at:", cardX, cardY);
+    
+    let dropSuccess = false;
+    
+    // Try to drop on foundations
+    for (let i = 0; i < 4; i++) {
+        if (pointInRect(cardX, cardY, areas.foundations[i])) {
+            dropSuccess = tryDropOnFoundation(i);
+            break;
+        }
+    }
+    
+    // If not dropped on foundation, try tableaus
+    if (!dropSuccess) {
+        for (let i = 0; i < 7; i++) {
+            if (pointInRect(cardX, cardY, areas.tableaus[i])) {
+                dropSuccess = tryDropOnTableau(i);
+                break;
+            }
+        }
+    }
+    
+    // Handle flipping cards if needed
+    if (dropSuccess && dragSource && dragSource.type === 'tableau') {
+        const sourcePile = tableaus[dragSource.index];
+        if (sourcePile.length > 0 && !sourcePile[sourcePile.length - 1].faceUp) {
+            sourcePile[sourcePile.length - 1].faceUp = true;
+        }
+    }
+    
+    // Clean up drag state
+    draggedCards = [];
+    isDragging = false;
+}
+
+
+// tryDropOnFoundation - Attempts to place a card on a foundation pile
+function tryDropOnFoundation(index) {
+    if (draggedCards.length !== 1) return false; // Only single cards can go to foundations
+    
+    const card = draggedCards[0];
+    const foundation = foundations[index];
+    
+    // Check if card matches foundation suit
+    const foundationSuit = suits[index];
+    if (card.suit !== foundationSuit) return false; // Card must match suit
+    
+    // Card must be ace for empty foundation, or one rank higher than top card
+    const isValid = 
+        (foundation.length === 0 && card.value === 'A') ||
+        (foundation.length > 0 && 
+         foundation[foundation.length - 1].rank === card.rank - 1);
+    
+    if (isValid) {
+        foundations[index].push({...card}); // Add card to foundation
+        removeCardFromSource(); // Remove from original location
+        return true;
+    }
+    return false;
+}
+
+// tryDropOnTableau - Attempts to place card(s) on a tableau pile
+function tryDropOnTableau(index) {
+    if (draggedCards.length === 0) return false;
+    
+    const card = draggedCards[0]; // First card in stack being moved
+    const tableau = tableaus[index];
+    
+    // Card must be king for empty tableau, or one rank lower and opposite color for non-empty
+    const isValid = 
+        (tableau.length === 0 && card.value === 'K') ||
+        (tableau.length > 0 &&
+         tableau[tableau.length - 1].faceUp &&
+         suitColors[tableau[tableau.length - 1].suit] !== suitColors[card.suit] &&
+         tableau[tableau.length - 1].rank === card.rank + 1);
+    
+    if (isValid) {
+        // Add all dragged cards to the tableau
+        draggedCards.forEach(card => {
+            tableaus[index].push({...card, faceUp: true});
+        });
+        
+        removeCardFromSource(); // Remove from original location
+        return true;
+    }
+    return false;
+}
+
+// removeCardFromSource - Removes dragged card(s) from their original location
+function removeCardFromSource() {
+    if (!dragSource) return;
+    
+    switch (dragSource.type) {
+        case 'waste':
+            waste.pop(); // Remove top card from waste
+            break;
+        case 'foundation':
+            foundations[dragSource.index].pop(); // Remove top card from foundation
+            break;
+        case 'tableau':
+            // Remove all cards from the drag point onwards
+            tableaus[dragSource.index] = 
+                tableaus[dragSource.index].slice(0, dragSource.cardIndex);
+            
+            // Flip the new top card of the source pile if it exists and is face down
+            if (tableaus[dragSource.index].length > 0) {
+                const newTopCard = tableaus[dragSource.index][tableaus[dragSource.index].length - 1];
+                if (!newTopCard.faceUp) {
+                    newTopCard.faceUp = true;
+                }
+            }
+            break;
+    }
+}
+
+// pointInRect - Helper function to check if a point is inside a rectangle
+function pointInRect(x, y, rect) {
+    return x >= rect.x && x <= rect.x + rect.width &&
+           y >= rect.y && y <= rect.y + rect.height;
+}
+
+// checkWin - Verifies if the player has won the game
+function checkWin() {
+    if (gameWon) return; // Skip if already won
+    
+    // Check if all foundations have 13 cards (complete suit from A to K)
+    const allComplete = foundations.every(foundation => foundation.length === 13);
+    
+    if (allComplete) {
+        gameWon = true; // Set game state to won
+        showMessage("Congratulations! You won!"); // Display win message
+    }
+}
+
+// showMessage - Displays a message to the player
+function showMessage(text) {
+    const message = document.getElementById('message');
+    message.textContent = text; // Set message text
+    message.style.display = "block"; // Make message visible
+    message.style.backgroundColor = "rgba(255, 255, 255, 0.9)"; // Semi-transparent background
+}
+
+// hideMessage - Hides the message dialog
+function hideMessage() {
+    document.getElementById('message').style.display = "none"; // Hide message
+}
+
+// autoComplete - Automatically completes the game (cheat/debug function)
+function autoComplete() {
+    // Clear existing piles
+    foundations = [[], [], [], []];
+    deck = [];
+    waste = [];
+    tableaus = [[], [], [], [], [], [], []];
+    
+    // Fill foundations with complete suits
+    for (let i = 0; i < suits.length; i++) {
+        const suit = suits[i];
+        foundations[i] = values.map((value, j) => ({
+            suit,
+            value,
+            rank: j + 1,
+            faceUp: true
+        }));
+    }
+    
+    gameWon = true; // Set game state to won
+    showMessage("Congratulations! You won!"); // Display win message
+}
+
+// Add start screen functionality - Sets up initial game screen
+document.getElementById('start-button').addEventListener('click', function() {
+    document.getElementById('start-screen').style.display = 'none'; // Hide start screen
+    document.getElementById('game-container').style.display = 'block'; // Show game container
+    initGame(); // Initialize the game
+});
+    </script>
+</body>
+</html>
